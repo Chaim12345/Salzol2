@@ -24,6 +24,7 @@ import il.salzol.go.ui.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,6 +37,21 @@ class MainActivity : ComponentActivity() {
             }
             i.getStringExtra("tab")?.let { startTab = it }
             i.getStringExtra("product")?.let { startTab = "product/" + android.net.Uri.encode(it) } // from a notification
+            // salzol:// deep links & static shortcuts (roadmap #7/#8)
+            i.data?.let { uri ->
+                when (val link = SalzolDeepLinks.parse(uri)) {
+                    is ParsedSalzolLink.ShortcutRoute -> when (link.route) {
+                        "scan" -> startScan = true // ProductsScreen opens the scanner on entry
+                        "cart", "shop?store=" -> startTab = link.route
+                        else -> {} // receipt/family have no screen yet — stay put
+                    }
+                    is ParsedSalzolLink.CartImport -> {
+                        startTab = "cart"
+                        lifecycleScope.launch { Go.addMany(link.items); Bus.poke() }
+                    }
+                    else -> {} // FamilyJoin: family sync UI not shipped yet
+                }
+            }
         }
         setContent { SalzolTheme { AppRoot() } }
     }
@@ -50,9 +66,6 @@ private val tabs = listOf(
     Tab("cart", "הסל", Icons.Outlined.ShoppingCart),
     Tab("more", "עוד", Icons.Outlined.MoreHoriz),
 )
-
-/** A tab to open on launch (automation and notifications): "deals", "cart", ... */
-var startTab: String? = null
 
 /** Opens a product sheet from anywhere. */
 fun NavHostController.openProduct(code: String) = navigate("product/" + android.net.Uri.encode(code))
@@ -76,7 +89,7 @@ fun AppRoot() {
     if (start == null && st != null) start = if (st.place == null) "location" else "home"
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var crash by remember { mutableStateOf(takeCrashReport(ctx)) }
-    LaunchedEffect(st != null) { startTab?.let { t -> if (st?.place != null) { nav.navigate(t); startTab = null } } }
+    LaunchedEffect(st != null) { startTab?.let { t -> if (st?.place != null) { runCatching { nav.navigate(t) }; startTab = null } } }
 
     Scaffold(
         containerColor = P.bg,

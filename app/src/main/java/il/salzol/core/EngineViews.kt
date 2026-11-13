@@ -92,6 +92,43 @@ object EngineViews {
         }
     }
 
+    /** Cart lines (codes) with no price at [storeIdx] — the inputs for Smart Swaps. */
+    private fun codesMissingAt(e: Engine, cur: ProductIndex, storeIdx: Int, now: Instant): List<String> =
+        e.st.cart.keys.filter { code ->
+            val q = e.st.cart[code] ?: 0.0
+            q > 0 && cur.byCode[code]?.let { cur.priceAt(it, storeIdx, q, e.st.club, now) } == null
+        }
+
+    /**
+     * Roadmap #2: substitute offers for the given unavailable cart lines. Each line is priced at
+     * the first store of [atStores] that sells a suitable substitute (with its name for context).
+     */
+    private fun swapsJson(e: Engine, cur: ProductIndex, atStores: List<Int>, now: Instant, unavailable: List<String>): JSONArray {
+        val arr = JSONArray()
+        val exclude = e.st.cart.keys.toHashSet()
+        for (code in unavailable) {
+            val p = cur.byCode[code] ?: continue
+            val q = e.st.cart[code] ?: 1.0
+            if (q <= 0) continue
+            for (at in atStores) {
+                if (at !in cur.stores.indices) continue
+                val cands = cur.swapsFor(p, q, at, e.st.club, now, exclude, limit = 2)
+                for (c in cands) {
+                    arr.put(JSONObject().apply {
+                        put("forCode", code); put("forName", p.name); put("qty", q)
+                        put("code", c.p.code); put("name", c.p.name)
+                        put("price", ShopUnits.money(c.cost))
+                        put("atStore", cur.storeName(at))
+                        put("inCart", e.st.cart.containsKey(c.p.code))
+                        c.promo?.let { put("deal", ProductIndex.dealText(it)) }
+                    })
+                }
+                if (cands.isNotEmpty()) break
+            }
+        }
+        return arr
+    }
+
     private fun imgUrl(e: Engine, p: ShopProduct): String {
         if (!e.st.images || p.img.isEmpty()) return ""
         val imgs = e.ix?.cat?.images ?: return ""
@@ -533,6 +570,7 @@ object EngineViews {
         val act = e.activeStores()
         val now = Instant.now()
         val cmp = cur.compare(e.st.cart, act, e.st.club, now)
+        val cartCodes = e.st.cart.keys.toHashSet()
         val linesArr = JSONArray()
         for (l in cmp.lines) {
             linesArr.put(JSONObject().apply {
@@ -566,6 +604,19 @@ object EngineViews {
                 put("best", k == 0)
                 if (s.lat != null && s.lon != null) {
                     put("lat", s.lat); put("lon", s.lon)
+                }
+                // roadmap #2: what this store's cart costs once every missing line has a substitute
+                if (r.missingCodes.isNotEmpty()) {
+                    var extra = 0.0
+                    var completable = true
+                    for (code in r.missingCodes) {
+                        val mp = cur.byCode[code] ?: run { completable = false; break }
+                        val mq = e.st.cart[code] ?: 1.0
+                        val bestSwap = cur.swapsFor(mp, mq, r.store, e.st.club, now, cartCodes, limit = 1).firstOrNull()
+                        if (bestSwap == null) { completable = false; break }
+                        extra += bestSwap.cost
+                    }
+                    if (completable) put("swapTotal", ShopUnits.money(r.total.toDouble() + extra))
                 }
             })
             if (r.missing.isEmpty()) complete.add(r.total)
@@ -738,7 +789,13 @@ object EngineViews {
                     put("groupsB", tB.getJSONArray("groups"))
                     put("doneB", tB.getInt("done")); put("ofB", tB.getInt("of"))
                 })
+                // roadmap #2: substitutes for lines missing at BOTH split stores
+                val missA = codesMissingAt(e, cur, pair.a, now).toHashSet()
+                val missBoth = codesMissingAt(e, cur, pair.b, now).filter { it in missA }
+                put("pairSwaps", swapsJson(e, cur, listOf(pair.a, pair.b), now, missBoth))
             }
+            // roadmap #2: substitutes for lines missing at the store shown above
+            put("swaps", swapsJson(e, cur, listOf(pickedIdx), now, codesMissingAt(e, cur, pickedIdx, now)))
         }.toString()
     }
 

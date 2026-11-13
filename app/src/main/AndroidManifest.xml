@@ -20,6 +20,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- static home-screen shortcuts from res/xml/shortcuts.xml (roadmap #8) -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+            <!-- salzol:// deep links (QR / shared links, roadmap #7) and the shortcut targets (#8) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="salzol" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

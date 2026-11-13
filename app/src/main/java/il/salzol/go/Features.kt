@@ -186,6 +186,23 @@ private fun ShopItemRow(it: ShopItem) {
     }
 }
 
+/** Roadmap #2: one substitute offer for a product the store doesn't sell, with a one-tap swap. */
+@Composable
+private fun SwapRow(s: SwapView, onSwap: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(P.surface, Round).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text("חסר: ${s.forName}", fontSize = 12.5.sp, color = P.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(s.name, fontWeight = FontWeight.SemiBold, color = P.ink, maxLines = 2)
+            val where = (if (s.atStore.isNotEmpty()) s.atStore + " · " else "") + s.price + " ₪" +
+                (if (s.deal.isNotEmpty()) " · מבצע ${s.deal}" else "")
+            Text(where, fontSize = 12.sp, color = P.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (s.inCart) Text("כבר בסל", fontSize = 12.sp, color = P.ink2, fontWeight = FontWeight.Bold)
+        else FilledTonalButton(onClick = onSwap) { Text("החלפה", fontWeight = FontWeight.Bold) }
+    }
+}
+
 /** One of the two shopping tickets of the split: a header card with its progress, then its lines. */
 private fun LazyColumnScope.SplitTicket(
     n: Int,
@@ -226,6 +243,7 @@ fun ShopScreen(nav: NavHostController, startStore: String) {
     var storeId by remember { mutableStateOf(if (startStore == SHOP_PAIR_ARG) "" else startStore) }
     val v = engineState(storeId) { Go.shop(storeId) }
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var pick by remember { mutableStateOf(false) }
     val pair = if (splitMode) v?.pair else null
     Column(Modifier.fillMaxSize()) {
@@ -251,6 +269,12 @@ fun ShopScreen(nav: NavHostController, startStore: String) {
                     }
                 }
                 if (v.missing.isNotEmpty()) item { Hint("לא נמכר בסניף הזה: " + v.missing.joinToString(", "), P.warn) }
+                if (v.swaps.isNotEmpty()) {
+                    item { SectionHead("חלופות לחסרים בסניף הזה", "מוצר דומה באותו סוג או קטגוריה ובדומה מחיר — בלחיצה אחת מחליפים") }
+                    items(v.swaps, key = { it.forCode + "|" + it.code }) { s ->
+                        SwapRow(s) { scope.launch { Go.swapItem(s.forCode, s.code, s.qty); Bus.poke() } }
+                    }
+                }
                 v.groups.forEach { g ->
                     item { Text(g.cat, fontWeight = FontWeight.ExtraBold, color = P.ink2, fontSize = 14.sp) }
                     items(g.items, key = { it.code }) { ShopItemRow(it) }
@@ -268,6 +292,12 @@ fun ShopScreen(nav: NavHostController, startStore: String) {
                 SplitTicket(1, pair.storeA, pair.addressA, pair.totalA, pair.itemsA, pair.doneA, pair.ofA, pair.latA, pair.lonA, pair.groupsA)
                 SplitTicket(2, pair.storeB, pair.addressB, pair.totalB, pair.itemsB, pair.doneB, pair.ofB, pair.latB, pair.lonB, pair.groupsB)
                 if (pair.missing.isNotEmpty()) item { Hint("לא נמכר באף אחד מהשניים: " + pair.missing.joinToString(", "), P.warn) }
+                if (v.pairSwaps.isNotEmpty()) {
+                    item { SectionHead("חלופות לחסרים בשני הסניפים", "זמין באחד משני הסניפים — ההחלפה מתבצעת שם") }
+                    items(v.pairSwaps, key = { it.forCode + "|" + it.code }) { s ->
+                        SwapRow(s) { scope.launch { Go.swapItem(s.forCode, s.code, s.qty); Bus.poke() } }
+                    }
+                }
             }
         }
     }

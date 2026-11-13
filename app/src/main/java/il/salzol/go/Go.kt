@@ -10,6 +10,13 @@ import org.json.JSONObject
  * The Go engine (core/droid). Every screen's data comes from here as JSON shaped for that screen;
  * calls run off the main thread. The classes below mirror core/app/views.go.
  */
+
+/** A tab to open on launch (automation, notifications, deep links): "deals", "cart", ... */
+var startTab: String? = null
+
+/** Set by a salzol://scan deep link: the products screen opens the barcode scanner on entry. */
+var startScan: Boolean = false
+
 object Go {
     suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) { block() }
 
@@ -32,6 +39,12 @@ object Go {
 
     suspend fun setQty(code: String, q: Double) = io { Droid.setQty(code, q).toInt() }
     suspend fun clearCart() = io { Droid.clearCart() }
+
+    /** Roadmap #2: drop the missing line and take the substitute at the same quantity. */
+    suspend fun swapItem(oldCode: String, newCode: String, qty: Double) = io {
+        Droid.setQty(oldCode, 0.0)
+        Droid.setQty(newCode, qty)
+    }
     suspend fun toggleStore(id: String) = io { Droid.toggleStore(id) }
     suspend fun setClub(chain: String, on: Boolean) = io { Droid.setClub(chain, on) }
     suspend fun toggleWatch(code: String) = io { Droid.toggleWatch(code) }
@@ -139,6 +152,14 @@ class CartRow(o: JSONObject) {
     val storeId = o.s("storeId"); val lat = o.d("lat"); val lon = o.d("lon")
     val store = o.s("store"); val km = o.d("km"); val total = o.s("total"); val shelf = o.s("shelf"); val deals = o.i("deals")
     val missing = o.strings("missing"); val doubt = o.strings("doubt"); val best = o.b("best")
+    val swapTotal = o.s("swapTotal") // roadmap #2: total incl. substitutes for the missing lines
+}
+
+/** Roadmap #2 (Smart Swaps): a substitute offer for a product the store doesn't sell. */
+class SwapView(o: JSONObject) {
+    val forCode = o.s("forCode"); val forName = o.s("forName"); val qty = o.d("qty")
+    val code = o.s("code"); val name = o.s("name"); val price = o.s("price")
+    val atStore = o.s("atStore"); val inCart = o.b("inCart"); val deal = o.s("deal")
 }
 
 class CartView(o: JSONObject) {
@@ -205,6 +226,8 @@ class ShopView(o: JSONObject) {
     val missing = o.strings("missing"); val done = o.i("done"); val of = o.i("of"); val lat = o.d("lat"); val lon = o.d("lon"); val address = o.s("address")
     val stores = o.list("stores") { LabelN(it) }
     val pair = o.optJSONObject("pair")?.let { PairSplitView(it) }
+    val swaps = o.list("swaps") { SwapView(it) }        // missing at the shown store (roadmap #2)
+    val pairSwaps = o.list("pairSwaps") { SwapView(it) } // missing at both split stores (roadmap #2)
 }
 
 /** Roadmap #4: the best 2-store split — two tickets, exact saving vs the cheapest single store. */

@@ -164,17 +164,20 @@ fun ProductsScreen(nav: NavHostController, startCat: String) {
         Column(Modifier.background(P.surface).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val ctx = androidx.compose.ui.platform.LocalContext.current
             var notFound by remember { mutableStateOf("") }
+            val doScan = {
+                scanBarcode(ctx) { code ->
+                    scope.launch {
+                        val found = Go.lookup(code)
+                        if (found.isNotEmpty()) nav.openProduct(found) else notFound = "הברקוד $code לא נמכר בסניפים שבהשוואה"
+                    }
+                }
+            }
+            // salzol://scan deep link / shortcut: open the scanner as soon as this screen appears
+            LaunchedEffect(Unit) { if (startScan) { startScan = false; doScan() } }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(q, { q = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("חיפוש מוצר, יצרן או סוג") },
                     leadingIcon = { Icon(Icons.Outlined.Search, null) }, trailingIcon = { if (q.isNotEmpty()) IconButton(onClick = { q = "" }) { Icon(Icons.Outlined.Close, "ניקוי") } })
-                IconButton(onClick = {
-                    scanBarcode(ctx) { code ->
-                        scope.launch {
-                            val found = Go.lookup(code)
-                            if (found.isNotEmpty()) nav.openProduct(found) else notFound = "הברקוד $code לא נמכר בסניפים שבהשוואה"
-                        }
-                    }
-                }) { Icon(Icons.Outlined.QrCodeScanner, "סריקת ברקוד", tint = P.ink) }
+                IconButton(onClick = { doScan() }) { Icon(Icons.Outlined.QrCodeScanner, "סריקת ברקוד", tint = P.ink) }
                 IconButton(onClick = { nav.navigate("paste") }) { Icon(Icons.Outlined.ContentPaste, "הדבקת רשימה", tint = P.ink) }
             }
             if (notFound.isNotEmpty()) Hint(notFound, P.warn)
@@ -349,6 +352,7 @@ fun CartScreen(nav: NavHostController) {
                         }
                     }
                     if (r.missing.isNotEmpty()) Hint("חסרים: " + r.missing.joinToString(", "), P.warn)
+                    if (r.swapTotal.isNotEmpty()) Text("כולל תחליפים לחסרים: ${r.swapTotal} ₪", color = P.good, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     if (r.doubt.isNotEmpty()) Hint("אולי לא על המדף: " + r.doubt.joinToString(", "), P.ink2)
                     val ctx = androidx.compose.ui.platform.LocalContext.current
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

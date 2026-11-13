@@ -93,7 +93,8 @@ data class StoreTotal(
     val fairShelf: Int,
     val deals: Int,
     val missing: List<String>,
-    val doubt: List<String>
+    val doubt: List<String>,
+    val missingCodes: List<String> = emptyList()
 )
 
 data class CartComparisonLine(
@@ -122,6 +123,15 @@ data class PairSplitLine(
     val store: Int,
     val cost: Double,
     val shelf: Double,
+    val promo: Promo?
+)
+
+/** Roadmap #2 (Smart Swaps): a substitute offered instead of a missing cart line at one store. */
+data class SwapCandidate(
+    val p: ShopProduct,
+    val cost: Double,   // promo-aware cost for the requested qty at that store (agorot)
+    val shelf: Double,  // cost without promotions (agorot)
+    val score: Double,  // type/category/unit-price ranking, higher = better fit
     val promo: Promo?
 )
 
@@ -556,11 +566,13 @@ class ProductIndex(
         val rows = active.map { i ->
             var total = 0.0; var shelf = 0.0; var fair = 0.0; var fairShelf = 0.0; var deals = 0
             val missing = mutableListOf<String>()
+            val missingCodes = mutableListOf<String>()
             val doubt = mutableListOf<String>()
             for ((p, q) in items) {
                 val pr = priceAt(p, i, q, club, now)
                 if (pr == null) {
                     missing.add(p.name)
+                    missingCodes.add(p.code)
                     continue
                 }
                 total += pr.cost
@@ -574,7 +586,7 @@ class ProductIndex(
                     fairShelf += pr.shelf
                 }
             }
-            StoreTotal(i, total.roundToInt(), shelf.roundToInt(), fair.roundToInt(), fairShelf.roundToInt(), deals, missing, doubt)
+            StoreTotal(i, total.roundToInt(), shelf.roundToInt(), fair.roundToInt(), fairShelf.roundToInt(), deals, missing, doubt, missingCodes)
         }.sortedWith(compareBy<StoreTotal> { it.missing.size }.thenBy { it.total })
 
         val usedStores = HashSet<Int>()
@@ -714,6 +726,51 @@ class ProductIndex(
             km = if (bestKm == Double.MAX_VALUE) -1.0 else bestKm,
             missing = missing, lines = lines
         )
+    }
+
+    /**
+     * Roadmap #2 — Smart Swaps: substitutes for cart line [p] (qty [q]) at store [at], where the
+     * store doesn't sell it. Candidates must share the AI product type or the category, and are
+     * ranked by type match, then category, unit-price proximity via [ShopUnits] (pack sizes) and
+     * shelf price; absurdly expensive items (>3× the original's cheapest unit price) are dropped
+     * and [exclude] keeps the rest of the cart out of the suggestions.
+     */
+    fun swapsFor(
+        p: ShopProduct,
+        q: Double,
+        at: Int,
+        club: Map<String, Boolean>,
+        now: Instant,
+        exclude: Set<String> = emptySet(),
+        limit: Int = 3
+    ): List<SwapCandidate> {
+        if (at !in stores.indices || q <= 0) return emptyList()
+        // reference: the original's cheapest shelf unit price across stores (−1 ⇒ no reference)
+        val refShelf = p.prices.filter { it >= 0 }.minOrNull() ?: -1
+        val refUnit = if (refShelf > 0) ShopUnits.sizeOf(p)?.let { ShopUnits.unitPriceOf(it, refShelf.toDouble()) }?.agorot else null
+        val aiType = p.ai?.t?.takeIf { it.isNotEmpty() }
+        val out = ArrayList<SwapCandidate>()
+        for (c in products) {
+            if (c.code == p.code || c.code in exclude) continue
+            val sameType = aiType != null && c.ai?.t == aiType
+            val sameCat = c.cat == p.cat
+            if (!sameType && !sameCat) continue
+            val shelfUnit = c.prices.getOrElse(at) { -1 }
+            if (shelfUnit < 0 || c.isStale(at)) continue
+            if (refShelf > 0 && shelfUnit > refShelf * 3) continue
+            val pr = priceAt(c, at, q, club, now) ?: continue
+            var score = 0.0
+            if (sameType) score += 100.0
+            if (sameCat) score += 40.0
+            if (c.weighted == p.weighted) score += 10.0
+            val candUnit = ShopUnits.sizeOf(c)?.let { ShopUnits.unitPriceOf(it, shelfUnit.toDouble()) }?.agorot
+            if (refUnit != null && refUnit > 0 && candUnit != null) {
+                score -= abs(candUnit / refUnit - 1.0) * 30.0
+            }
+            if (refShelf > 0) score -= (shelfUnit.toDouble() / refShelf) * 5.0
+            out.add(SwapCandidate(c, pr.cost, pr.shelf, score, pr.promo))
+        }
+        return out.sortedWith(compareByDescending<SwapCandidate> { it.score }.thenBy { it.cost }).take(limit)
     }
 
     fun buildDeals(active: List<Int>, club: Map<String, Boolean>, now: Instant): List<Deal> {
