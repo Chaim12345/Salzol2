@@ -20,6 +20,78 @@ object EngineViews {
         return (kmBetween(p.lat, p.lon, s.lat, s.lon) * 10.0).roundToInt() / 10.0
     }
 
+    /** Roadmap #4: the 2-store split summary shared by the cart and shop screens. */
+    private fun pairSummaryJson(cur: ProductIndex, pair: PairSplit): JSONObject = JSONObject().apply {
+        val sa = cur.stores[pair.a]
+        val sb = cur.stores[pair.b]
+        put("storeIdA", sa.id)
+        put("storeA", cur.storeName(pair.a))
+        put("addressA", sa.address)
+        if (sa.lat != null && sa.lon != null) { put("latA", sa.lat); put("lonA", sa.lon) }
+        put("storeIdB", sb.id)
+        put("storeB", cur.storeName(pair.b))
+        put("addressB", sb.address)
+        if (sb.lat != null && sb.lon != null) { put("latB", sb.lat); put("lonB", sb.lon) }
+        put("itemsA", pair.itemsA)
+        put("itemsB", pair.itemsB)
+        put("totalA", ShopUnits.money(pair.totalA.toDouble()))
+        put("totalB", ShopUnits.money(pair.totalB.toDouble()))
+        put("total", ShopUnits.money(pair.total.toDouble()))
+        put("shelf", ShopUnits.money(pair.shelf.toDouble()))
+        put("saving", ShopUnits.money(pair.saving.toDouble()))
+        put("baseline", ShopUnits.money(pair.baselineTotal.toDouble()))
+        put("baselineStore", cur.storeName(pair.baselineStore))
+        put("km", pair.km)
+        put("missing", JSONArray(pair.missing))
+    }
+
+    /** The walk-order checklist for one store; [only] narrows it to the lines of one split ticket. */
+    private fun shopGroupsJson(e: Engine, cur: ProductIndex, storeIdx: Int, now: Instant, only: ((String) -> Boolean)?): JSONObject {
+        val byCat = LinkedHashMap<String, MutableList<JSONObject>>()
+        val missing = mutableListOf<String>()
+        var done = 0; var of = 0
+        for ((code, q) in e.st.cart) {
+            if (q <= 0) continue
+            val p = cur.byCode[code] ?: continue
+            if (only != null && !only(code)) continue
+            val pr = cur.priceAt(p, storeIdx, q, e.st.club, now)
+            if (pr == null) {
+                missing.add(p.name)
+                continue
+            }
+            val nm = if (p.weighted && p.picks != null && p.picks.getOrNull(storeIdx)?.isNotEmpty() == true) {
+                "${p.name} (${p.picks[storeIdx]})"
+            } else p.name
+            val checked = e.st.checked.contains(code)
+            val obj = JSONObject().apply {
+                put("code", code); put("name", nm); put("qty", q)
+                put("price", ShopUnits.money(pr.cost))
+                pr.promo?.let { put("deal", ProductIndex.dealText(it)) }
+                put("checked", checked); put("stale", p.isStale(storeIdx)); put("img", imgUrl(e, p))
+            }
+            byCat.getOrPut(p.cat) { mutableListOf() }.add(obj)
+            of++
+            if (checked) done++
+        }
+
+        val walkOrder = listOf("produce", "bakery", "dairy", "meat", "frozen", "pantry", "snacks", "drinks", "cleaning", "care", "pets", "other")
+        val groupsArr = JSONArray()
+        val catNames = cur.cat.categories.associate { it.id to it.name }
+        for (c in walkOrder) {
+            val l = byCat.remove(c) ?: continue
+            l.sortBy { it.optString("name") }
+            groupsArr.put(JSONObject().put("cat", catNames[c] ?: c).put("items", JSONArray(l)))
+        }
+        for ((c, l) in byCat) {
+            groupsArr.put(JSONObject().put("cat", catNames[c] ?: c).put("items", JSONArray(l)))
+        }
+        return JSONObject().apply {
+            put("groups", groupsArr)
+            put("missing", JSONArray(missing.sorted()))
+            put("done", done); put("of", of)
+        }
+    }
+
     private fun imgUrl(e: Engine, p: ShopProduct): String {
         if (!e.st.images || p.img.isEmpty()) return ""
         val imgs = e.ix?.cat?.images ?: return ""
@@ -459,7 +531,8 @@ object EngineViews {
             return JSONObject().put("count", e.st.cart.size).put("lines", JSONArray()).put("rows", JSONArray()).toString()
         }
         val act = e.activeStores()
-        val cmp = cur.compare(e.st.cart, act, e.st.club, Instant.now())
+        val now = Instant.now()
+        val cmp = cur.compare(e.st.cart, act, e.st.club, now)
         val linesArr = JSONArray()
         for (l in cmp.lines) {
             linesArr.put(JSONObject().apply {
@@ -502,6 +575,8 @@ object EngineViews {
             if (hi > lo) ShopUnits.money((hi - lo).toDouble()) else ""
         } else ""
 
+        val pair = cur.bestPairSplit(e.st.cart, act, e.st.club, now, cmp)
+
         return JSONObject().apply {
             put("count", e.st.cart.size)
             put("lines", linesArr)
@@ -510,6 +585,7 @@ object EngineViews {
             put("splitStores", cmp.splitStores)
             put("saving", saving)
             put("common", cmp.common)
+            if (pair != null) put("pair", pairSummaryJson(cur, pair))
         }.toString()
     }
 
@@ -638,54 +714,31 @@ object EngineViews {
             storesArr.put(JSONObject().put("id", cur.stores[r.store].id).put("label", "${cur.storeName(r.store)} · ${ShopUnits.money(r.total.toDouble())} ₪"))
         }
 
-        val byCat = LinkedHashMap<String, MutableList<JSONObject>>()
-        val missing = mutableListOf<String>()
-        var done = 0; var of = 0
-        for ((code, q) in e.st.cart) {
-            if (q <= 0) continue
-            val p = cur.byCode[code] ?: continue
-            val pr = cur.priceAt(p, pickedIdx, q, e.st.club, now)
-            if (pr == null) {
-                missing.add(p.name)
-                continue
-            }
-            val nm = if (p.weighted && p.picks != null && p.picks.getOrNull(pickedIdx)?.isNotEmpty() == true) {
-                "${p.name} (${p.picks[pickedIdx]})"
-            } else p.name
-            val checked = e.st.checked.contains(code)
-            val obj = JSONObject().apply {
-                put("code", code); put("name", nm); put("qty", q)
-                put("price", ShopUnits.money(pr.cost))
-                pr.promo?.let { put("deal", ProductIndex.dealText(it)) }
-                put("checked", checked); put("stale", p.isStale(pickedIdx)); put("img", imgUrl(e, p))
-            }
-            byCat.getOrPut(p.cat) { mutableListOf() }.add(obj)
-            of++
-            if (checked) done++
-        }
-
-        val walkOrder = listOf("produce", "bakery", "dairy", "meat", "frozen", "pantry", "snacks", "drinks", "cleaning", "care", "pets", "other")
-        val groupsArr = JSONArray()
-        val catNames = cur.cat.categories.associate { it.id to it.name }
-        for (c in walkOrder) {
-            val l = byCat.remove(c) ?: continue
-            l.sortBy { it.optString("name") }
-            groupsArr.put(JSONObject().put("cat", catNames[c] ?: c).put("items", JSONArray(l)))
-        }
-        for ((c, l) in byCat) {
-            groupsArr.put(JSONObject().put("cat", catNames[c] ?: c).put("items", JSONArray(l)))
-        }
+        val single = shopGroupsJson(e, cur, pickedIdx, now, null)
+        val pair = cur.bestPairSplit(e.st.cart, act, e.st.club, now, cmp)
 
         return JSONObject().apply {
             put("store", cur.storeName(pickedIdx))
             put("storeId", s.id)
             put("total", row?.let { ShopUnits.money(it.total.toDouble()) } ?: "0.00")
-            put("groups", groupsArr)
-            put("missing", JSONArray(missing.sorted()))
-            put("done", done); put("of", of)
+            put("groups", single.getJSONArray("groups"))
+            put("missing", single.getJSONArray("missing"))
+            put("done", single.getInt("done")); put("of", single.getInt("of"))
             put("lat", s.lat ?: 0.0); put("lon", s.lon ?: 0.0)
             put("address", s.address)
             put("stores", storesArr)
+            if (pair != null) {
+                val assign = HashMap<String, Int>(pair.lines.size)
+                pair.lines.forEach { assign[it.p.code] = it.store }
+                val tA = shopGroupsJson(e, cur, pair.a, now) { assign[it] == pair.a }
+                val tB = shopGroupsJson(e, cur, pair.b, now) { assign[it] == pair.b }
+                put("pair", pairSummaryJson(cur, pair).apply {
+                    put("groupsA", tA.getJSONArray("groups"))
+                    put("doneA", tA.getInt("done")); put("ofA", tA.getInt("of"))
+                    put("groupsB", tB.getJSONArray("groups"))
+                    put("doneB", tB.getInt("done")); put("ofB", tB.getInt("of"))
+                })
+            }
         }.toString()
     }
 

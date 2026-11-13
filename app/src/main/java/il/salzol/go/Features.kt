@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyColumnScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -166,42 +167,107 @@ fun ListsScreen(nav: NavHostController) {
 
 // ---------------------------------------------------------------- in-store checklist
 
+/** Route/arg that opens the checklist pre-split into the two tickets of the best pair (roadmap #4). */
+const val SHOP_PAIR_ARG = "__pair__"
+const val SHOP_PAIR_ROUTE = "shop?store=$SHOP_PAIR_ARG"
+
+/** One checklist row — shared by the single-store view and by both split tickets. */
+@Composable
+private fun ShopItemRow(it: ShopItem) {
+    val scope = rememberCoroutineScope()
+    Row(Modifier.fillMaxWidth().background(P.surface, Round).clickable { scope.launch { Go.setChecked(it.code, !it.checked); Bus.poke() } }.padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Checkbox(it.checked, { on -> scope.launch { Go.setChecked(it.code, on); Bus.poke() } })
+        Column(Modifier.weight(1f)) {
+            Text(it.name, fontWeight = FontWeight.SemiBold, color = if (it.checked) P.ink2 else P.ink, textDecoration = if (it.checked) TextDecoration.LineThrough else null, maxLines = 2)
+            Text("× ${fmtQty(it.qty)}" + (if (it.deal.isNotEmpty()) " · מבצע ${it.deal}" else "") + (if (it.stale) " · אולי לא על המדף" else ""), fontSize = 12.sp, color = P.ink2)
+        }
+        Text("${it.price} ₪", fontWeight = FontWeight.Bold, color = P.ink)
+    }
+}
+
+/** One of the two shopping tickets of the split: a header card with its progress, then its lines. */
+private fun LazyColumnScope.SplitTicket(
+    n: Int,
+    name: String,
+    address: String,
+    total: String,
+    itemCount: Int,
+    done: Int,
+    of: Int,
+    lat: Double,
+    lon: Double,
+    groups: List<ShopGroup>
+) {
+    item {
+        val ctx = LocalContext.current
+        val ink = if (n == 1) P.brandInk else P.ink
+        val ink2 = if (n == 1) P.brandInk.copy(alpha = 0.75f) else P.ink2
+        Column(Modifier.fillMaxWidth().background(if (n == 1) P.brand else P.surface, Round).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("כרטיס $n", color = ink2, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+            Text(name, color = ink, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+            if (address.isNotEmpty()) Text(address, color = ink2, fontSize = 13.sp)
+            Text("$total ₪ · $itemCount מוצרים · סומנו $done מתוך $of", color = ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            LinearProgressIndicator(progress = { if (of > 0) done.toFloat() / of else 0f }, Modifier.fillMaxWidth(), color = P.tag, trackColor = if (n == 1) P.brandInk.copy(alpha = 0.3f) else P.line)
+            if (lat != 0.0 || lon != 0.0) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { navigateTo(ctx, lat, lon, name) }) { Icon(Icons.Outlined.Directions, null); Spacer(Modifier.width(4.dp)); Text("ניווט") }
+            }
+        }
+    }
+    groups.forEach { g ->
+        item { Text(g.cat, fontWeight = FontWeight.ExtraBold, color = P.ink2, fontSize = 14.sp) }
+        items(g.items, key = { it.code }) { ShopItemRow(it) }
+    }
+}
+
 @Composable
 fun ShopScreen(nav: NavHostController, startStore: String) {
-    var storeId by remember { mutableStateOf(startStore) }
+    var splitMode by remember { mutableStateOf(startStore == SHOP_PAIR_ARG) }
+    var storeId by remember { mutableStateOf(if (startStore == SHOP_PAIR_ARG) "" else startStore) }
     val v = engineState(storeId) { Go.shop(storeId) }
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     var pick by remember { mutableStateOf(false) }
+    val pair = if (splitMode) v?.pair else null
     Column(Modifier.fillMaxSize()) {
         Header(nav, "יוצאים לקנות")
         if (v == null) Loading("טוען…") else LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item {
-                Column(Modifier.fillMaxWidth().background(P.brand, Round).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(v.store, color = P.brandInk, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
-                    if (v.address.isNotEmpty()) Text(v.address, color = P.brandInk, fontSize = 13.sp)
-                    Text("${v.total} ₪ · סומנו ${v.done} מתוך ${v.of}", color = P.brandInk, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    LinearProgressIndicator(progress = { if (v.of > 0) v.done.toFloat() / v.of else 0f }, Modifier.fillMaxWidth(), color = P.tag, trackColor = P.brandInk.copy(alpha = 0.3f))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(onClick = { navigateTo(ctx, v.lat, v.lon, v.store) }) { Icon(Icons.Outlined.Directions, null); Spacer(Modifier.width(4.dp)); Text("ניווט") }
-                        FilledTonalButton(onClick = { pick = true }) { Text("סניף אחר") }
-                    }
+            if (v.pair != null) item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("סניף אחד", !splitMode) { splitMode = false }
+                    Chip("פיצול ל־2 סניפים", splitMode) { splitMode = true }
                 }
             }
-            if (v.missing.isNotEmpty()) item { Hint("לא נמכר בסניף הזה: " + v.missing.joinToString(", "), P.warn) }
-            v.groups.forEach { g ->
-                item { Text(g.cat, fontWeight = FontWeight.ExtraBold, color = P.ink2, fontSize = 14.sp) }
-                items(g.items, key = { it.code }) { it2 ->
-                    Row(Modifier.fillMaxWidth().background(P.surface, Round).clickable { scope.launch { Go.setChecked(it2.code, !it2.checked); Bus.poke() } }.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Checkbox(it2.checked, { on -> scope.launch { Go.setChecked(it2.code, on); Bus.poke() } })
-                        Column(Modifier.weight(1f)) {
-                            Text(it2.name, fontWeight = FontWeight.SemiBold, color = if (it2.checked) P.ink2 else P.ink, textDecoration = if (it2.checked) TextDecoration.LineThrough else null, maxLines = 2)
-                            Text("× ${fmtQty(it2.qty)}" + (if (it2.deal.isNotEmpty()) " · מבצע ${it2.deal}" else "") + (if (it2.stale) " · אולי לא על המדף" else ""), fontSize = 12.sp, color = P.ink2)
+            if (pair == null) {
+                item {
+                    Column(Modifier.fillMaxWidth().background(P.brand, Round).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(v.store, color = P.brandInk, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                        if (v.address.isNotEmpty()) Text(v.address, color = P.brandInk, fontSize = 13.sp)
+                        Text("${v.total} ₪ · סומנו ${v.done} מתוך ${v.of}", color = P.brandInk, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        LinearProgressIndicator(progress = { if (v.of > 0) v.done.toFloat() / v.of else 0f }, Modifier.fillMaxWidth(), color = P.tag, trackColor = P.brandInk.copy(alpha = 0.3f))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = { navigateTo(ctx, v.lat, v.lon, v.store) }) { Icon(Icons.Outlined.Directions, null); Spacer(Modifier.width(4.dp)); Text("ניווט") }
+                            FilledTonalButton(onClick = { pick = true }) { Text("סניף אחר") }
                         }
-                        Text("${it2.price} ₪", fontWeight = FontWeight.Bold, color = P.ink)
                     }
                 }
+                if (v.missing.isNotEmpty()) item { Hint("לא נמכר בסניף הזה: " + v.missing.joinToString(", "), P.warn) }
+                v.groups.forEach { g ->
+                    item { Text(g.cat, fontWeight = FontWeight.ExtraBold, color = P.ink2, fontSize = 14.sp) }
+                    items(g.items, key = { it.code }) { ShopItemRow(it) }
+                }
+            } else {
+                item {
+                    Column(Modifier.fillMaxWidth().background(P.brand, Round).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("קנייה מפוצלת — 2 כרטיסים", color = P.brandInk, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                        Text("${pair.total} ₪ · חוסכים ${pair.saving} ₪", color = P.brandInk, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("הסניף הבודד הזול ביותר: ${pair.baselineStore} · ${pair.baseline} ₪", color = P.brandInk, fontSize = 13.sp)
+                        if (pair.km >= 0) Text("מרחק בין שני הסניפים: ${pair.km} ק״מ", color = P.brandInk, fontSize = 13.sp)
+                        if (pair.shelf != pair.total) Text("בלי מבצעים: ${pair.shelf} ₪", color = P.brandInk, fontSize = 13.sp)
+                    }
+                }
+                SplitTicket(1, pair.storeA, pair.addressA, pair.totalA, pair.itemsA, pair.doneA, pair.ofA, pair.latA, pair.lonA, pair.groupsA)
+                SplitTicket(2, pair.storeB, pair.addressB, pair.totalB, pair.itemsB, pair.doneB, pair.ofB, pair.latB, pair.lonB, pair.groupsB)
+                if (pair.missing.isNotEmpty()) item { Hint("לא נמכר באף אחד מהשניים: " + pair.missing.joinToString(", "), P.warn) }
             }
         }
     }

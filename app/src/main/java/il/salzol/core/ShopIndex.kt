@@ -115,6 +115,39 @@ data class CartComparison(
     val splitStores: Int
 )
 
+/** One line of the 2-store split (roadmap #4): bought at [store], one of the chosen pair. */
+data class PairSplitLine(
+    val p: ShopProduct,
+    val q: Double,
+    val store: Int,
+    val cost: Double,
+    val shelf: Double,
+    val promo: Promo?
+)
+
+/**
+ * Roadmap #4 — the best *pair* of stores for the whole cart. Every line goes to whichever of the
+ * two chosen stores sells it cheaper, the pair beats the cheapest single store by [saving] agorot
+ * without leaving more items unsold than [baselineStore] did, and [km] is the drive between the
+ * two stops (< 0 when either coordinates are unknown).
+ */
+data class PairSplit(
+    val a: Int,
+    val b: Int,
+    val total: Int,
+    val shelf: Int,
+    val totalA: Int,
+    val totalB: Int,
+    val itemsA: Int,
+    val itemsB: Int,
+    val saving: Int,
+    val baselineStore: Int,
+    val baselineTotal: Int,
+    val km: Double,
+    val missing: List<String>,
+    val lines: List<PairSplitLine>
+)
+
 data class Deal(
     val id: String,
     val p: ShopProduct,
@@ -565,6 +598,122 @@ class ProductIndex(
         }
         val fairLow = rows.minOfOrNull { it.fair } ?: 0
         return CartComparison(lines, rows, common.size, fairLow, split.roundToInt(), splitShelf.roundToInt(), usedStores.size)
+    }
+
+    /**
+     * Roadmap #4 — best pair of stores for this cart, optimised for "two nearby stops" instead of
+     * the theoretical [CartComparison.split] that can scatter the basket over every branch:
+     * every line is bought at the cheaper of the two stores, and the pair must beat the cheapest
+     * single store of [cmp] by at least [minSaving] agorot while losing nothing that store sold.
+     *
+     * Pairs farther apart than [maxKm] are only considered when no closer pair qualifies, and
+     * never beyond [farKm]. Returns null when a second stop doesn't pay for itself.
+     */
+    fun bestPairSplit(
+        cart: Map<String, Double>,
+        active: List<Int>,
+        club: Map<String, Boolean>,
+        now: Instant,
+        cmp: CartComparison,
+        maxKm: Double = 5.0,
+        farKm: Double = 25.0,
+        minSaving: Int = 100
+    ): PairSplit? {
+        if (active.size < 2 || cart.isEmpty()) return null
+        val items = cart.keys.sorted().mapNotNull { c ->
+            val p = byCode[c]
+            val q = cart[c] ?: 0.0
+            if (p != null && q > 0) p to q else null
+        }
+        if (items.isEmpty()) return null
+        // cheapest complete store; when none is complete, the one with fewest gaps then cheapest
+        val baseline = cmp.rows.firstOrNull { it.missing.isEmpty() } ?: cmp.rows.firstOrNull() ?: return null
+
+        // cost of every line at every active store, -1 when not sold there
+        val n = active.size
+        val m = items.size
+        val cost = Array(m) { j ->
+            val (p, q) = items[j]
+            DoubleArray(n) { si -> priceAt(p, active[si], q, club, now)?.cost ?: -1.0 }
+        }
+        fun pairKm(x: Int, y: Int): Double {
+            val sa = stores.getOrNull(active[x])
+            val sb = stores.getOrNull(active[y])
+            if (sa?.lat == null || sa.lon == null || sb?.lat == null || sb.lon == null) return -1.0
+            return (kmBetween(sa.lat, sa.lon, sb.lat, sb.lon) * 10.0).roundToInt() / 10.0
+        }
+
+        var bestX = -1; var bestY = -1
+        var bestTotal = 0; var bestKm = Double.MAX_VALUE
+
+        fun consider(x: Int, y: Int, limitKm: Double) {
+            val d = pairKm(x, y)
+            if (d >= 0 && d > limitKm) return
+            var tA = 0.0; var tB = 0.0
+            var cA = 0; var cB = 0; var miss = 0
+            for (j in 0 until m) {
+                val ca = cost[j][x]; val cb = cost[j][y]
+                when {
+                    ca < 0 && cb < 0 -> miss++
+                    ca < 0 -> { tB += cb; cB++ }
+                    cb < 0 -> { tA += ca; cA++ }
+                    ca <= cb -> { tA += ca; cA++ }
+                    else -> { tB += cb; cB++ }
+                }
+            }
+            if (cA == 0 || cB == 0) return                 // one of the two stops would be pointless
+            if (miss > baseline.missing.size) return       // worse coverage than the single baseline
+            val total = tA.roundToInt() + tB.roundToInt()
+            if (total >= baseline.total - minSaving) return // not worth a second stop
+            val dKey = if (d >= 0) d else Double.MAX_VALUE
+            if (bestX < 0 || total < bestTotal || (total == bestTotal && dKey < bestKm)) {
+                bestX = x; bestY = y; bestTotal = total; bestKm = dKey
+            }
+        }
+
+        // pass 1: only nearby pairs; pass 2 (only if pass 1 found nothing): any pair within farKm
+        for (pass in 0..1) {
+            val limit = if (pass == 0) maxKm else farKm
+            for (x in 0 until n - 1) for (y in x + 1 until n) consider(x, y, limit)
+            if (bestX >= 0) break
+        }
+        if (bestX < 0) return null
+
+        // re-run the winning assignment so the returned lines carry each product's promo/price
+        val a = active[bestX]; val b = active[bestY]
+        val lines = ArrayList<PairSplitLine>(m)
+        val missing = mutableListOf<String>()
+        var sumA = 0.0; var sumB = 0.0; var shelfSum = 0.0
+        var itemsA = 0; var itemsB = 0
+        for ((p, q) in items) {
+            val prA = priceAt(p, a, q, club, now)
+            val prB = priceAt(p, b, q, club, now)
+            val pr: Priced?
+            val store: Int
+            when {
+                prA == null && prB == null -> { pr = null; store = -1 }
+                prB == null -> { pr = prA; store = a }
+                prA == null -> { pr = prB; store = b }
+                prA.cost <= prB.cost -> { pr = prA; store = a }
+                else -> { pr = prB; store = b }
+            }
+            if (pr == null) { missing.add(p.name); continue }
+            lines.add(PairSplitLine(p, q, store, pr.cost, pr.shelf, pr.promo))
+            if (store == a) { sumA += pr.cost; itemsA++ } else { sumB += pr.cost; itemsB++ }
+            shelfSum += pr.shelf
+        }
+        val totalA = sumA.roundToInt(); val totalB = sumB.roundToInt()
+        return PairSplit(
+            a = a, b = b,
+            total = totalA + totalB,
+            shelf = shelfSum.roundToInt(),
+            totalA = totalA, totalB = totalB,
+            itemsA = itemsA, itemsB = itemsB,
+            saving = baseline.total - (totalA + totalB),
+            baselineStore = baseline.store, baselineTotal = baseline.total,
+            km = if (bestKm == Double.MAX_VALUE) -1.0 else bestKm,
+            missing = missing, lines = lines
+        )
     }
 
     fun buildDeals(active: List<Int>, club: Map<String, Boolean>, now: Instant): List<Deal> {

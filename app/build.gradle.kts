@@ -4,7 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
-    id("com.google.gms.google-services")
+    // google-services is applied conditionally below — the repo builds without google-services.json.
 }
 
 android {
@@ -29,18 +29,23 @@ android {
         }
     }
 
-    signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+    // debug.keystore is optional: when absent (fresh clone, CI) the default debug keystore
+    // (~/.android/debug.keystore, auto-created by AGP) signs debug builds and release stays unsigned.
+    val debugKs = file("${rootDir}/debug.keystore")
+    if (debugKs.exists()) {
+        signingConfigs {
+            create("debugConfig") {
+                storeFile = debugKs
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("debugConfig")
+            if (debugKs.exists()) signingConfig = signingConfigs.getByName("debugConfig")
         }
         release {
             isMinifyEnabled = true
@@ -49,9 +54,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debugConfig")
+            if (debugKs.exists()) signingConfig = signingConfigs.getByName("debugConfig")
         }
     }
+}
+
+// Firebase's google-services plugin is optional: with no google-services.json the app still
+// compiles and unit-tests (tests configure Firebase manually); drop the file in and it activates.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 dependencies {

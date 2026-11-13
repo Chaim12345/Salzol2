@@ -144,6 +144,7 @@ class CartRow(o: JSONObject) {
 class CartView(o: JSONObject) {
     val count = o.i("count"); val lines = o.list("lines") { CartLine(it) }; val rows = o.list("rows") { CartRow(it) }
     val split = o.s("split"); val splitStores = o.i("splitStores"); val saving = o.s("saving"); val common = o.i("common")
+    val pair = o.optJSONObject("pair")?.let { PairSplitView(it) }
 }
 
 class DealView(o: JSONObject) {
@@ -203,6 +204,21 @@ class ShopView(o: JSONObject) {
     val store = o.s("store"); val storeId = o.s("storeId"); val total = o.s("total"); val groups = o.list("groups") { ShopGroup(it) }
     val missing = o.strings("missing"); val done = o.i("done"); val of = o.i("of"); val lat = o.d("lat"); val lon = o.d("lon"); val address = o.s("address")
     val stores = o.list("stores") { LabelN(it) }
+    val pair = o.optJSONObject("pair")?.let { PairSplitView(it) }
+}
+
+/** Roadmap #4: the best 2-store split — two tickets, exact saving vs the cheapest single store. */
+class PairSplitView(o: JSONObject) {
+    val storeIdA = o.s("storeIdA"); val storeA = o.s("storeA"); val addressA = o.s("addressA")
+    val latA = o.d("latA"); val lonA = o.d("lonA"); val itemsA = o.i("itemsA"); val totalA = o.s("totalA")
+    val storeIdB = o.s("storeIdB"); val storeB = o.s("storeB"); val addressB = o.s("addressB")
+    val latB = o.d("latB"); val lonB = o.d("lonB"); val itemsB = o.i("itemsB"); val totalB = o.s("totalB")
+    val total = o.s("total"); val shelf = o.s("shelf"); val saving = o.s("saving")
+    val baseline = o.s("baseline"); val baselineStore = o.s("baselineStore")
+    val km = o.d("km"); val missing = o.strings("missing")
+    val doneA = o.i("doneA"); val ofA = o.i("ofA"); val doneB = o.i("doneB"); val ofB = o.i("ofB")
+    val groupsA = o.list("groupsA") { ShopGroup(it) }
+    val groupsB = o.list("groupsB") { ShopGroup(it) }
 }
 
 class ListMatch(o: JSONObject) {

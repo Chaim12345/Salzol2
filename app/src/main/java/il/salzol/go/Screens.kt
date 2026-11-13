@@ -309,6 +309,24 @@ fun CartScreen(nav: NavHostController) {
                     if (c.splitStores > 1) Text("קנייה בכל מוצר בסניף הזול שלו: ${c.split} ₪ ב־${c.splitStores} סניפים", color = P.brandInk, fontSize = 13.sp)
                 }
             }
+            val pair = c.pair
+            if (pair != null) item {
+                Column(Modifier.fillMaxWidth().background(P.surface, Round).padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Outlined.CallSplit, null, tint = P.brand, modifier = Modifier.size(18.dp))
+                        Text("פיצול ל־2 סניפים משתלם יותר", fontWeight = FontWeight.ExtraBold, color = P.ink, fontSize = 15.sp)
+                    }
+                    Text("${pair.total} ₪ · חוסכים ${pair.saving} ₪ מול הסניף הבודד הזול ביותר", color = P.good, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
+                    Text("${pair.baselineStore}: ${pair.baseline} ₪", fontSize = 12.5.sp, color = P.ink2)
+                    Text("${pair.storeA} · ${pair.totalA} ₪ (${pair.itemsA} מוצרים)", fontSize = 13.sp, color = P.ink, fontWeight = FontWeight.SemiBold)
+                    Text("${pair.storeB} · ${pair.totalB} ₪ (${pair.itemsB} מוצרים)", fontSize = 13.sp, color = P.ink, fontWeight = FontWeight.SemiBold)
+                    if (pair.km >= 0) Text("מרחק בין הסניפים: ${pair.km} ק״מ", fontSize = 12.5.sp, color = P.ink2)
+                    if (pair.missing.isNotEmpty()) Hint("לא נמכר באף אחד מהשניים: " + pair.missing.joinToString(", "), P.warn)
+                    Button(onClick = { nav.navigate(SHOP_PAIR_ROUTE) }, Modifier.fillMaxWidth().height(44.dp)) {
+                        Icon(Icons.Outlined.CallSplit, null); Spacer(Modifier.width(6.dp)); Text("לפצל לשתי קניות", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
             item {
                 val ctx = androidx.compose.ui.platform.LocalContext.current
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
