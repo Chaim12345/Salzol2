@@ -1,0 +1,124 @@
+{
+  "entities": {
+    "SharedFamilyList": {
+      "title": "SharedFamilyList",
+      "description": "Shared household grocery list synced across signed-in family members.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the creator"
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded list (1..20) of Firebase Auth UIDs with read/write access"
+        },
+        "inviteCode": {
+          "type": "string",
+          "description": "4-16 char uppercase alphanumeric join code"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the shared list"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()"
+        }
+      },
+      "required": ["ownerId", "memberUids", "inviteCode", "name", "createdAt", "updatedAt"]
+    },
+    "SharedFamilyItem": {
+      "title": "SharedFamilyItem",
+      "description": "An item in a shared family grocery list with denormalized memberUids for flat security rules.",
+      "type": "object",
+      "properties": {
+        "addedBy": {
+          "type": "string",
+          "description": "UID of member who created/added the item"
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized list of member UIDs copied from parent SharedFamilyList"
+        },
+        "code": {
+          "type": "string",
+          "description": "Original product barcode or catalog code"
+        },
+        "name": {
+          "type": "string",
+          "description": "Product name"
+        },
+        "qty": {
+          "type": "number",
+          "description": "Desired quantity (> 0, <= 500)"
+        },
+        "checked": {
+          "type": "boolean",
+          "description": "Whether checked off while shopping"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()"
+        }
+      },
+      "required": ["addedBy", "memberUids", "code", "name", "qty", "checked", "createdAt", "updatedAt"]
+    },
+    "CloudWatchedItem": {
+      "title": "CloudWatchedItem",
+      "description": "User's synced price watchlist entry and target alert price in agorot.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Product barcode or catalog code"
+        },
+        "name": {
+          "type": "string",
+          "description": "Product display name"
+        },
+        "targetAgorot": {
+          "type": "integer",
+          "description": "Optional target price threshold in agorot (0 = any drop)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()"
+        }
+      },
+      "required": ["code", "name", "targetAgorot", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/shared_lists/{listId}": {
+      "schema": { "$ref": "SharedFamilyList" },
+      "description": "Shared family grocery lists keyed by listId"
+    },
+    "/shared_lists/{listId}/items/{itemDocId}": {
+      "schema": { "$ref": "SharedFamilyItem" },
+      "description": "Items belonging to a shared family grocery list"
+    },
+    "/users/{userId}/watched/{itemDocId}": {
+      "schema": { "$ref": "CloudWatchedItem" },
+      "description": "Per-user synced price watchlist and target-price thresholds"
+    }
+  }
+}

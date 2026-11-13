@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan_barcode"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_scan"
+        android:shortcutShortLabel="@string/shortcut_scan_short"
+        android:shortcutLongLabel="@string/shortcut_scan_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="salzol://scan"
+            android:targetClass="il.salzol.go.MainActivity"
+            android:targetPackage="il.salzol.go" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="shop_checklist"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_shop"
+        android:shortcutShortLabel="@string/shortcut_shop_short"
+        android:shortcutLongLabel="@string/shortcut_shop_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="salzol://shop"
+            android:targetClass="il.salzol.go.MainActivity"
+            android:targetPackage="il.salzol.go" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="receipt_audit"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_receipt"
+        android:shortcutShortLabel="@string/shortcut_receipt_short"
+        android:shortcutLongLabel="@string/shortcut_receipt_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="salzol://receipt"
+            android:targetClass="il.salzol.go.MainActivity"
+            android:targetPackage="il.salzol.go" />
+    </shortcut>
+</shortcuts>

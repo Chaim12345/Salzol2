@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidSharedList(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 20 &&
+             data.ownerId in data.memberUids &&
+             data.inviteCode is string && data.inviteCode.size() >= 4 && data.inviteCode.size() <= 16 &&
+             data.inviteCode.matches('^[A-Z0-9]+$') &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSharedItem(data) {
+      return data.addedBy is string && data.addedBy.size() >= 1 && data.addedBy.size() <= 128 &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 20 &&
+             data.code is string && data.code.size() >= 1 && data.code.size() <= 80 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 140 &&
+             (data.qty is int || data.qty is float) && data.qty > 0 && data.qty <= 500 &&
+             data.checked is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidWatchedItem(data) {
+      return data.code is string && data.code.size() >= 1 && data.code.size() <= 80 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 140 &&
+             data.targetAgorot is int && data.targetAgorot >= 0 && data.targetAgorot <= 1000000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /shared_lists/{listId} {
+      allow get: if isSignedIn() && isValidId(listId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(listId) &&
+                       incoming().keys().hasAll(['ownerId', 'memberUids', 'inviteCode', 'name', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['ownerId', 'memberUids', 'inviteCode', 'name', 'createdAt', 'updatedAt']) &&
+                       incoming().ownerId == request.auth.uid &&
+                       isValidSharedList(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(listId) &&
+                       isValidSharedList(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().inviteCode == existing().inviteCode && (
+                         // Action 1: Existing member renames or updates membership (owner protected inside memberUids)
+                         (
+                           request.auth.uid in existing().memberUids &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberUids', 'updatedAt'])
+                         ) ||
+                         // Action 2: Invited signed-in user joins list (uid appended to memberUids)
+                         (
+                           !(request.auth.uid in existing().memberUids) &&
+                           request.auth.uid in incoming().memberUids &&
+                           incoming().memberUids.hasAll(existing().memberUids) &&
+                           incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(listId) && existing().ownerId == request.auth.uid;
+
+      match /items/{itemDocId} {
+        allow get: if isSignedIn() && isValidId(listId) && isValidId(itemDocId) && (
+          (resource != null && request.auth.uid in existing().memberUids) ||
+          (resource == null &&
+            exists(/databases/$(database)/documents/shared_lists/$(listId)) &&
+            request.auth.uid in get(/databases/$(database)/documents/shared_lists/$(listId)).data.memberUids)
+        );
+        allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(listId) &&
+                         isValidId(itemDocId) &&
+                         incoming().keys().hasAll(['addedBy', 'memberUids', 'code', 'name', 'qty', 'checked', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['addedBy', 'memberUids', 'code', 'name', 'qty', 'checked', 'createdAt', 'updatedAt']) &&
+                         incoming().addedBy == request.auth.uid &&
+                         isValidSharedItem(incoming()) &&
+                         request.auth.uid in incoming().memberUids &&
+                         exists(/databases/$(database)/documents/shared_lists/$(listId)) &&
+                         request.auth.uid in get(/databases/$(database)/documents/shared_lists/$(listId)).data.memberUids;
+
+        allow update: if isSignedIn() &&
+                         isValidId(listId) &&
+                         isValidId(itemDocId) &&
+                         request.auth.uid in existing().memberUids &&
+                         isValidSharedItem(incoming()) &&
+                         incoming().addedBy == existing().addedBy &&
+                         incoming().code == existing().code &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'qty', 'checked', 'memberUids', 'updatedAt']);
+
+        allow delete: if isSignedIn() &&
+                         isValidId(listId) &&
+                         isValidId(itemDocId) &&
+                         request.auth.uid in existing().memberUids;
+      }
+    }
+
+    match /users/{userId}/watched/{itemDocId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(itemDocId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(itemDocId) &&
+                       incoming().keys().hasAll(['code', 'name', 'targetAgorot', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['code', 'name', 'targetAgorot', 'createdAt', 'updatedAt']) &&
+                       isValidWatchedItem(incoming());
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(itemDocId) &&
+                       isValidWatchedItem(incoming()) &&
+                       incoming().code == existing().code &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'targetAgorot', 'updatedAt']);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(itemDocId);
+    }
+  }
+}

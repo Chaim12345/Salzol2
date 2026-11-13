@@ -6,3 +6,4 @@
 -keep class androidx.work.** { *; }
 -keep class * extends androidx.room.RoomDatabase { *; }
 -keep class androidx.room.** { *; }
+-keep class * extends androidx.glance.appwidget.action.ActionCallback { <init>(...); }

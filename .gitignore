@@ -1,0 +1,12 @@
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+*-debug.log
+.DS_Store

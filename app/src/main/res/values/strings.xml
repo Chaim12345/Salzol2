@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">סל זול</string>
+    <string name="widget_description">סיכום הסל הזול וגישה מהירה לסורק הברקוד ולרשימת הקנייה</string>
+    <string name="shortcut_scan_short">סריקת ברקוד</string>
+    <string name="shortcut_scan_long">סריקת ברקוד מהמדף</string>
+    <string name="shortcut_shop_short">קנייה בסניף</string>
+    <string name="shortcut_shop_long">פתיחת רשימת הקנייה בסופר</string>
+    <string name="shortcut_receipt_short">סריקת קבלה</string>
+    <string name="shortcut_receipt_long">סריקת קבלה ובדיקת פערים בקופה</string>
 </resources>
