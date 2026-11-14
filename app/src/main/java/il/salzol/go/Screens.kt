@@ -17,8 +17,13 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -206,6 +211,52 @@ fun ProductsScreen(nav: NavHostController, startCat: String) {
 // ---------------------------------------------------------------- product sheet
 
 @Composable
+/** Roadmap #3: daily cheapest-shelf sparkline with trend direction and cheapest-now badge. */
+@Composable
+private fun TrendCard(points: List<HistoryPoint>, trend: TrendView) {
+    val minP = points.minOf { it.price }
+    val maxP = points.maxOf { it.price }
+    val span = maxOf(1, maxP - minP)
+    val days = runCatching {
+        (java.time.LocalDate.parse(points.last().day).toEpochDay() -
+            java.time.LocalDate.parse(points.first().day).toEpochDay()).toInt()
+    }.getOrDefault(0)
+    Column(Modifier.fillMaxWidth().background(P.surface, Round).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("מחיר המדף הזול ביותר", fontWeight = FontWeight.Bold, color = P.ink, fontSize = 14.sp)
+            Text(
+                if (trend.direction > 0) "↑ מגמת עלייה" else if (trend.direction < 0) "↓ מגמת ירידה" else "→ יציב",
+                color = if (trend.direction > 0) P.bad else if (trend.direction < 0) P.good else P.ink2,
+                fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold
+            )
+        }
+        Canvas(Modifier.fillMaxWidth().height(84.dp)) {
+            val w = size.width
+            val h = size.height
+            val step = if (points.size > 1) w / (points.size - 1) else w
+            fun yOf(v: Int): Float = h - ((v - minP).toFloat() / span) * (h - 10f) - 5f
+            drawLine(P.ink2.copy(alpha = 0.25f), Offset(0f, yOf(minP)), Offset(w, yOf(minP)), strokeWidth = 1.5f)
+            drawLine(P.ink2.copy(alpha = 0.15f), Offset(0f, yOf(maxP)), Offset(w, yOf(maxP)), strokeWidth = 1.5f)
+            val path = Path()
+            points.forEachIndexed { i, pt ->
+                val x = i * step
+                if (i == 0) path.moveTo(x, yOf(pt.price)) else path.lineTo(x, yOf(pt.price))
+            }
+            drawPath(path, color = P.brand, style = Stroke(width = 3f, cap = StrokeCap.Round))
+            drawCircle(P.brand, radius = 5f, center = Offset((points.size - 1) * step, yOf(points.last().price)))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(points.first().day, fontSize = 11.sp, color = P.ink2)
+            if (trend.cheapestNow) Badge("הכי זול ב־$days יום", P.good)
+            Text(points.last().day, fontSize = 11.sp, color = P.ink2)
+        }
+        Text(
+            "טווח ההיסטורי: ${trend.min}–${trend.max} ₪ · עכשיו ${trend.last} ₪",
+            fontSize = 12.sp, color = P.ink2, modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
 fun ProductScreen(nav: NavHostController, code: String) {
     val p = engineState(code) { Go.product(code) }
     val scope = rememberCoroutineScope()
@@ -242,6 +293,16 @@ fun ProductScreen(nav: NavHostController, code: String) {
                 }
             }
             if (p.best.isNotEmpty()) item { Text(p.best, Modifier.fillMaxWidth().background(P.bad.copy(alpha = 0.08f), Round).padding(12.dp), color = P.ink, fontWeight = FontWeight.SemiBold) }
+            if (p.hike != null) item {
+                val h = p.hike!!
+                Text(
+                    "⚠️ המדף הועלה ${h.pct}% ב־${h.day} — סמוך למבצע שפורסם ב־${h.promoDay} " +
+                        "(${h.from} ₪ → ${h.to} ₪). המבצע עלול להיות מדומה.",
+                    Modifier.fillMaxWidth().background(P.warn.copy(alpha = 0.12f), Round).padding(12.dp),
+                    color = P.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+                )
+            }
+            if (p.trend != null && p.history.size >= 2) item { TrendCard(p.history, p.trend!!) }
             if (p.listed.isNotEmpty() || p.odd.isNotEmpty()) item {
                 Panel {
                     if (p.listed.isNotEmpty()) Hint("רשום בלי מחיר במחירון של: " + p.listed.joinToString(", "))

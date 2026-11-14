@@ -559,6 +559,40 @@ object EngineViews {
             put("watched", e.st.watch.contains(code))
             put("listed", JSONArray(p.np.map { cur.storeName(it) }))
             put("odd", JSONArray(p.odd.map { "${cur.storeName(it.first)}: ${ShopUnits.money(it.second.toDouble())} ₪, כנראה טעות במחירון" }))
+            // roadmap #3: daily cheapest-shelf series, trend summary and hike-before-promo alert
+            val changesFor = e.st.changes.filter { it.code == code }
+            val currentByStore = HashMap<String, Int>()
+            cur.stores.forEachIndexed { i, s ->
+                val v = p.prices[i]
+                if (v > 0 && (p.stale[i] ?: 0) < STALE_DAYS) currentByStore[s.id] = v
+            }
+            val series = PriceTrend.dailyMinSeries(
+                changesFor, currentByStore,
+                LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+            )
+            if (series.isNotEmpty()) {
+                put("history", JSONArray().apply {
+                    series.forEach { pt -> put(JSONObject().put("day", pt.day).put("price", pt.price)) }
+                })
+            }
+            PriceTrend.summarize(series)?.let { t ->
+                put("trend", JSONObject().apply {
+                    put("min", ShopUnits.money(t.min.toDouble()))
+                    put("max", ShopUnits.money(t.max.toDouble()))
+                    put("last", ShopUnits.money(t.last.toDouble()))
+                    put("cheapestNow", t.cheapestNow)
+                    put("direction", t.direction)
+                })
+            }
+            PriceTrend.hikeBeforePromo(code, changesFor, cur.cat.promos.flatten()).firstOrNull()?.let { h ->
+                put("hike", JSONObject().apply {
+                    put("day", h.day)
+                    put("from", ShopUnits.money(h.from.toDouble()))
+                    put("to", ShopUnits.money(h.to.toDouble()))
+                    put("pct", h.pct)
+                    put("promoDay", h.promoDay)
+                })
+            }
         }.toString()
     }
 

@@ -10,3 +10,5 @@ app/build/
 local.properties
 *-debug.log
 .DS_Store
+# local verification harness (compile stubs + JUnit-lite runner; not shipped)
+.harness/

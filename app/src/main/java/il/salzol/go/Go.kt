@@ -141,6 +141,27 @@ class ProductView(o: JSONObject) {
     val facts = o.strings("facts"); val lo = o.s("lo"); val hi = o.s("hi"); val loWhere = o.s("loWhere"); val gapPct = o.i("gapPct")
     val best = o.s("best"); val rows = o.list("rows") { PriceRow(it) }; val qty = o.d("qty"); val watched = o.b("watched")
     val listed = o.strings("listed"); val odd = o.strings("odd")
+    // roadmap #3: price history chart + trend + fake-deal alert
+    val history = o.list("history") { HistoryPoint(it) }
+    val trend = o.optJSONObject("trend")?.let { TrendView(it) }
+    val hike = o.optJSONObject("hike")?.let { HikeView(it) }
+}
+
+/** Roadmap #3: one day of the cheapest-shelf series (price in agorot). */
+class HistoryPoint(o: JSONObject) {
+    val day = o.s("day"); val price = o.i("price")
+}
+
+/** Roadmap #3: trend summary of the history series (display strings + direction). */
+class TrendView(o: JSONObject) {
+    val min = o.s("min"); val max = o.s("max"); val last = o.s("last")
+    val cheapestNow = o.b("cheapestNow"); val direction = o.i("direction")
+}
+
+/** Roadmap #3: shelf price hiked shortly before a promo was announced. */
+class HikeView(o: JSONObject) {
+    val day = o.s("day"); val from = o.s("from"); val to = o.s("to")
+    val pct = o.i("pct"); val promoDay = o.s("promoDay")
 }
 
 class CartLine(o: JSONObject) {
